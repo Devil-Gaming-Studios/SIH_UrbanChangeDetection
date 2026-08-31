@@ -41,6 +41,7 @@ async def analyze(
     year_earlier: int = Form(...),
     year_later: int = Form(...),
     threshold: float = Form(0.5),
+    pixel_resolution_m: float = Form(None),
 ):
     if not CHECKPOINT_PATH.exists():
         raise HTTPException(500, f"Checkpoint not found at {CHECKPOINT_PATH}. Add your trained model file.")
@@ -67,7 +68,7 @@ async def analyze(
         raise HTTPException(500, f"Inference failed: {exc}")
 
     image_paths = save_outputs(result, earlier_path, later_path, run_dir, stem="result", threshold=threshold)
-    stats = compute_growth_stats(result, year_earlier, year_later)
+    stats = compute_growth_stats(result, year_earlier, year_later, pixel_resolution_m=pixel_resolution_m)
     chart_path = run_dir / "growth_chart.png"
     make_growth_chart(stats, chart_path)
 

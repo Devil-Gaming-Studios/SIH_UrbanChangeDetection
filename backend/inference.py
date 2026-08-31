@@ -167,12 +167,22 @@ def run_whole_image(model, x, qa, orig_hw, multiple=32):
     ndvi_epochs = torch.stack([crop(ndvi_epochs[t]) for t in range(ndvi_epochs.shape[0])])
     ndwi_epochs = torch.stack([crop(ndwi_epochs[t]) for t in range(ndwi_epochs.shape[0])])
 
+    # QA validity, resized back to the original resolution, for a
+    # confidence/uncertainty summary in the report.
+    qa_orig = F.interpolate(
+        qa_padded.reshape(-1, 1, *qa_padded.shape[-2:]),
+        size=x.shape[-2:], mode="nearest",
+    ).reshape(qa_padded.shape[0], qa_padded.shape[1], *x.shape[-2:])
+    qa_orig = qa_orig[0]  # [T, H, W]
+    qa_orig = torch.stack([crop(qa_orig[t]) for t in range(qa_orig.shape[0])])
+
     return (
         probability.cpu().numpy(),
         ndvi_delta.cpu().numpy(),
         ndwi_delta.cpu().numpy(),
         ndvi_epochs.cpu().numpy(),
         ndwi_epochs.cpu().numpy(),
+        qa_orig.cpu().numpy(),
     )
 
 
@@ -183,14 +193,15 @@ def run_inference(checkpoint_path, image_earlier_path, image_later_path, device=
     image_later_path   = newer image (epoch A)
 
     Returns a dict of numpy arrays: probability, ndvi_delta, ndwi_delta,
-    ndvi_epochs [2,H,W] (earlier, later), ndwi_epochs [2,H,W], plus orig_hw.
+    ndvi_epochs [2,H,W] (earlier, later), ndwi_epochs [2,H,W], qa validity
+    [2,H,W] (earlier, later), plus orig_hw.
     """
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = load_model(checkpoint_path, device)
 
     x, qa, orig_hw = prepare_pair(image_later_path, image_earlier_path, device)
 
-    probability, ndvi_delta, ndwi_delta, ndvi_epochs, ndwi_epochs = run_whole_image(
+    probability, ndvi_delta, ndwi_delta, ndvi_epochs, ndwi_epochs, qa_orig = run_whole_image(
         model, x, qa, orig_hw
     )
 
@@ -206,6 +217,8 @@ def run_inference(checkpoint_path, image_earlier_path, image_later_path, device=
         "ndvi_later": ndvi_epochs[0],
         "ndwi_earlier": ndwi_epochs[1],
         "ndwi_later": ndwi_epochs[0],
+        "qa_earlier": qa_orig[1],
+        "qa_later": qa_orig[0],
         "changed_fraction": changed_fraction,
         "orig_hw": orig_hw,
     }
