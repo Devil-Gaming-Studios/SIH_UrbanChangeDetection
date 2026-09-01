@@ -377,6 +377,36 @@ def build_pdf_report(
         story.append(Paragraph(stats["direction_summary"], styles["BodyText"]))
         story.append(Spacer(1, 0.4 * cm))
 
+    # Classical image-comparison metrics (MSE/PSNR/SSIM/histogram distance)
+    classical = stats.get("classical_metrics")
+    if classical:
+        story.append(Paragraph("Classical image-comparison metrics", styles["Heading2"]))
+        classical_data = [
+            ["Metric", "Value"],
+            ["MSE (pixel-level difference)", f"{classical['mse']:.5f}"],
+            ["PSNR", f"{classical['psnr_db']:.2f} dB" if classical['psnr_db'] is not None else "∞ (identical images)"],
+            ["SSIM (structural similarity)", f"{classical['ssim_score']:.4f}"],
+            ["Histogram distance (color/illumination)", f"{classical['histogram_distance']:.4f}"],
+        ]
+        classical_table = Table(classical_data, colWidths=[9 * cm, 6 * cm])
+        classical_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
+        ]))
+        story.append(classical_table)
+        if classical.get("illumination_mismatch_warning"):
+            story.append(Spacer(1, 0.2 * cm))
+            story.append(Paragraph(
+                "⚠ The two images have noticeably different color/illumination "
+                "profiles (season, sensor, or time-of-day differences). Interpret "
+                "the change results with this in mind.",
+                styles["BodyText"],
+            ))
+        story.append(Spacer(1, 0.5 * cm))
+
     story.append(Paragraph("Projected growth", styles["Heading2"]))
     story.append(RLImage(str(growth_chart_path), width=15 * cm, height=8 * cm))
     story.append(Spacer(1, 0.5 * cm))
@@ -400,6 +430,11 @@ def build_pdf_report(
     if "confidence" in image_paths:
         add_image_row("Data confidence", [
             ("confidence", "QA validity map for the newer image (darker = lower confidence)"),
+        ])
+
+    if "ssim_map" in image_paths:
+        add_image_row("Structural similarity (SSIM)", [
+            ("ssim_map", "Per-pixel SSIM — darker regions indicate more structural change"),
         ])
 
     add_image_row("Change detection outputs", [

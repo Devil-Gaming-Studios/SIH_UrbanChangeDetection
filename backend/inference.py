@@ -186,6 +186,30 @@ def run_whole_image(model, x, qa, orig_hw, multiple=32):
     )
 
 
+def get_aligned_rgb_pair(earlier_path, later_path):
+    """Read and resize both images to the same shape, returning float RGB
+    arrays in [0, 1], for classical pixel-level metrics (MSE/PSNR/SSIM/
+    histogram distance). Uses the same normalization as read_image.
+    """
+    a = read_image(Path(later_path))
+    b = read_image(Path(earlier_path))
+
+    # Resize b to match a's spatial dims if needed.
+    if b.shape[:2] != a.shape[:2]:
+        b_img = Image.fromarray((np.clip(b, 0, 1) * 255).astype(np.uint8))
+        b_img = b_img.resize((a.shape[1], a.shape[0]))
+        b = np.asarray(b_img).astype(np.float32) / 255.0
+        if b.ndim == 2:
+            b = b[..., None]
+
+    def to_rgb3(arr):
+        if arr.shape[-1] == 1:
+            return np.repeat(arr, 3, axis=-1)
+        return arr[..., :3]
+
+    return to_rgb3(a), to_rgb3(b)
+
+
 def run_inference(checkpoint_path, image_earlier_path, image_later_path, device=None, threshold=0.5):
     """High-level entry point used by the API layer.
 

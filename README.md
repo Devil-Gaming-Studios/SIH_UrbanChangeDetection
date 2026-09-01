@@ -12,9 +12,11 @@ backend/
   model.py        # SatelliteChangeNet architecture
   inference.py     # image loading, QA masking, model inference
   report.py         # output images + PDF report generation
-  main.py            # FastAPI app (single /analyze endpoint)
+  db.py              # SQLite history store (SQLAlchemy)
+  main.py            # FastAPI app (/analyze, /history endpoints)
   requirements.txt
   checkpoint_final.pth   # <- you add this (trained model weights, not included)
+  history.db              # <- auto-created SQLite DB on first run
 
 frontend/
   src/
@@ -73,8 +75,15 @@ requests to `http://localhost:8000` (see `frontend/vite.config.js`).
    - NDWI (water) maps for both years, their change map, and an overlay
    - growth statistics: % of area changed, estimated annual growth rate,
      and a simple linear growth projection chart
+   - classical image-comparison metrics: MSE, PSNR, SSIM (+ a per-pixel
+     SSIM map), and a color-histogram distance flag for illumination/
+     season/sensor mismatches between the two images
 3. All of the above is bundled into a downloadable PDF report
    (`report.pdf`), alongside inline results in the UI.
+4. Every run is saved to a local SQLite database (`backend/history.db`).
+   The frontend's **History** tab lists past runs (with a thumbnail,
+   years, and % changed) — click one to reload its full results, or
+   delete it.
 
 ## Deploying
 

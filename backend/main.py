@@ -8,8 +8,10 @@ from fastapi.staticfiles import StaticFiles
 
 import torch
 
-from inference import run_inference
+from inference import run_inference, get_aligned_rgb_pair
 from report import save_outputs, compute_growth_stats, make_growth_chart, build_pdf_report
+from image_metrics import compute_classical_metrics
+import db
 
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "runs"
@@ -18,6 +20,7 @@ DATA_DIR.mkdir(exist_ok=True)
 CHECKPOINT_PATH = BASE_DIR / "checkpoint_final.pth"  # place your trained checkpoint here
 
 app = FastAPI(title="Urban Change Detection API")
+db.init_db()
 
 app.add_middleware(
     CORSMiddleware,
@@ -69,6 +72,17 @@ async def analyze(
 
     image_paths = save_outputs(result, earlier_path, later_path, run_dir, stem="result", threshold=threshold)
     stats = compute_growth_stats(result, year_earlier, year_later, pixel_resolution_m=pixel_resolution_m)
+
+    try:
+        earlier_rgb, later_rgb = get_aligned_rgb_pair(earlier_path, later_path)
+        classical_stats, classical_images = compute_classical_metrics(
+            earlier_rgb, later_rgb, run_dir, stem="result"
+        )
+        stats["classical_metrics"] = classical_stats
+        image_paths.update(classical_images)
+    except Exception:
+        pass  # classical metrics are a supplementary signal; skip silently on failure
+
     chart_path = run_dir / "growth_chart.png"
     make_growth_chart(stats, chart_path)
 
@@ -81,12 +95,30 @@ async def analyze(
     def url_for(p: Path) -> str:
         return f"/files/{run_id}/{p.name}"
 
+    images_urls = {k: url_for(v) for k, v in image_paths.items()}
+    growth_chart_url = url_for(chart_path)
+    report_pdf_url = url_for(pdf_path)
+
+    db.save_run(
+        run_id=run_id,
+        year_earlier=year_earlier,
+        year_later=year_later,
+        threshold=threshold,
+        pixel_resolution_m=pixel_resolution_m,
+        earlier_filename=image_earlier.filename,
+        later_filename=image_later.filename,
+        stats=stats,
+        images=images_urls,
+        growth_chart_url=growth_chart_url,
+        report_pdf_url=report_pdf_url,
+    )
+
     return {
         "run_id": run_id,
         "stats": stats,
-        "images": {k: url_for(v) for k, v in image_paths.items()},
-        "growth_chart": url_for(chart_path),
-        "report_pdf": url_for(pdf_path),
+        "images": images_urls,
+        "growth_chart": growth_chart_url,
+        "report_pdf": report_pdf_url,
     }
 
 
@@ -96,3 +128,27 @@ def get_report(run_id: str):
     if not pdf_path.exists():
         raise HTTPException(404, "Report not found")
     return {"report_pdf": f"/files/{run_id}/report.pdf"}
+
+
+@app.get("/history")
+def get_history(limit: int = 50):
+    return {"runs": db.list_runs(limit=limit)}
+
+
+@app.get("/history/{run_id}")
+def get_history_run(run_id: str):
+    record = db.get_run(run_id)
+    if not record:
+        raise HTTPException(404, "Run not found")
+    return record
+
+
+@app.delete("/history/{run_id}")
+def delete_history_run(run_id: str):
+    deleted = db.delete_run(run_id)
+    if not deleted:
+        raise HTTPException(404, "Run not found")
+    run_dir = DATA_DIR / run_id
+    if run_dir.exists():
+        shutil.rmtree(run_dir, ignore_errors=True)
+    return {"deleted": True}

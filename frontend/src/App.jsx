@@ -38,8 +38,74 @@ function Lightbox({ image, onClose }) {
   );
 }
 
+function HistoryPanel({ onSelect, refreshKey }) {
+  const [runs, setRuns] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch('/api/history')
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setRuns(data.runs || []);
+      })
+      .catch((err) => !cancelled && setError(err.message))
+      .finally(() => !cancelled && setLoading(false));
+    return () => { cancelled = true; };
+  }, [refreshKey]);
+
+  async function handleDelete(e, runId) {
+    e.stopPropagation();
+    await fetch(`/api/history/${runId}`, { method: 'DELETE' }).catch(() => {});
+    setRuns((prev) => prev.filter((r) => r.run_id !== runId));
+  }
+
+  if (loading) return <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Loading history…</p>;
+  if (error) return <p className="error">{error}</p>;
+  if (runs.length === 0) return <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>No past runs yet.</p>;
+
+  return (
+    <div className="image-grid">
+      {runs.map((r) => (
+        <figure
+          key={r.run_id}
+          className="image-card"
+          onClick={() => onSelect(r.run_id)}
+          style={{ cursor: 'pointer' }}
+        >
+          {r.thumbnail_url ? (
+            <img src={r.thumbnail_url} alt={r.run_id} loading="lazy" />
+          ) : (
+            <div style={{ aspectRatio: '4/3', background: 'var(--stat-bg)' }} />
+          )}
+          <figcaption>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <span>
+                {r.year_earlier} → {r.year_later} · {r.changed_percentage.toFixed(1)}% changed
+              </span>
+              <button
+                type="button"
+                onClick={(e) => handleDelete(e, r.run_id)}
+                style={{ background: 'transparent', color: 'var(--text-faint)', padding: '2px 6px', fontSize: 11 }}
+              >
+                ✕
+              </button>
+            </div>
+            <span className="badge" style={{ marginTop: 4 }}>
+              {new Date(r.created_at).toLocaleString()}
+            </span>
+          </figcaption>
+        </figure>
+      ))}
+    </div>
+  );
+}
+
 export default function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
+  const [activeTab, setActiveTab] = useState('analyze'); // 'analyze' | 'history'
   const [earlierFile, setEarlierFile] = useState(null);
   const [laterFile, setLaterFile] = useState(null);
   const [yearEarlier, setYearEarlier] = useState(2018);
@@ -50,6 +116,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
   const [lightboxImage, setLightboxImage] = useState(null);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -58,6 +125,21 @@ export default function App() {
 
   function openLightbox(src, caption) {
     setLightboxImage({ src, caption });
+  }
+
+  async function loadRunFromHistory(runId) {
+    setError(null);
+    try {
+      const res = await fetch(`/api/history/${runId}`);
+      if (!res.ok) throw new Error('Could not load that run.');
+      const data = await res.json();
+      setResult(data);
+      if (data.year_earlier) setYearEarlier(data.year_earlier);
+      if (data.year_later) setYearLater(data.year_later);
+      setActiveTab('analyze');
+    } catch (err) {
+      setError(err.message);
+    }
   }
 
   async function handleSubmit(e) {
@@ -87,6 +169,7 @@ export default function App() {
       }
       const data = await res.json();
       setResult(data);
+      setHistoryRefreshKey((k) => k + 1);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -114,6 +197,30 @@ export default function App() {
         </button>
       </div>
 
+      <div className="tabs">
+        <button
+          type="button"
+          className={`tab-btn ${activeTab === 'analyze' ? 'active' : ''}`}
+          onClick={() => setActiveTab('analyze')}
+        >
+          Analyze
+        </button>
+        <button
+          type="button"
+          className={`tab-btn ${activeTab === 'history' ? 'active' : ''}`}
+          onClick={() => setActiveTab('history')}
+        >
+          History
+        </button>
+      </div>
+
+      {activeTab === 'history' && (
+        <Section title="Past runs" defaultOpen={true}>
+          <HistoryPanel onSelect={loadRunFromHistory} refreshKey={historyRefreshKey} />
+        </Section>
+      )}
+
+      {activeTab === 'analyze' && (
       <form className="card" onSubmit={handleSubmit}>
         <div className="grid-2">
           <div>
@@ -179,8 +286,9 @@ export default function App() {
 
         {error && <div className="error">{error}</div>}
       </form>
+      )}
 
-      {result && (
+      {activeTab === 'analyze' && result && (
         <>
           <Section title="Executive summary" meta={`${yearEarlier} → ${yearLater}`}>
             <p className="exec-summary">{result.stats.executive_summary}</p>
@@ -244,6 +352,48 @@ export default function App() {
                 </div>
               </div>
               <p className="direction-note">{result.stats.direction_summary}</p>
+            </Section>
+          )}
+
+          {result.stats.classical_metrics && (
+            <Section title="Classical image-comparison metrics" defaultOpen={false}>
+              <div className="stats-grid">
+                <div className="stat">
+                  <div className="value">{result.stats.classical_metrics.mse.toFixed(5)}</div>
+                  <div className="label">MSE</div>
+                </div>
+                <div className="stat">
+                  <div className="value">
+                    {result.stats.classical_metrics.psnr_db !== null
+                      ? `${result.stats.classical_metrics.psnr_db.toFixed(2)} dB`
+                      : '∞'}
+                  </div>
+                  <div className="label">PSNR</div>
+                </div>
+                <div className="stat">
+                  <div className="value">{result.stats.classical_metrics.ssim_score.toFixed(4)}</div>
+                  <div className="label">SSIM</div>
+                </div>
+                <div className="stat">
+                  <div className="value">{result.stats.classical_metrics.histogram_distance.toFixed(4)}</div>
+                  <div className="label">Histogram distance</div>
+                </div>
+              </div>
+              {result.stats.classical_metrics.illumination_mismatch_warning && (
+                <p className="direction-note" style={{ color: '#f59e0b' }}>
+                  ⚠ The two images have noticeably different color/illumination profiles
+                  (season, sensor, or time-of-day). Interpret change results with this in mind.
+                </p>
+              )}
+              {result.images.ssim_map && (
+                <div className="image-grid" style={{ marginTop: 12 }}>
+                  <ImageCard
+                    src={result.images.ssim_map}
+                    caption="Per-pixel SSIM map (darker = more structural change)"
+                    onOpen={openLightbox}
+                  />
+                </div>
+              )}
             </Section>
           )}
 
