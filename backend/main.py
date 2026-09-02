@@ -31,7 +31,7 @@ DATA_DIR.mkdir(exist_ok=True)
 
 # Two independently trained checkpoints.
 RGB_CHECKPOINT_PATH = BASE_DIR / "checkpoint_final.pth"
-MSI_CHECKPOINT_PATH = BASE_DIR / "checkpoint_final (2).pth"
+MSI_CHECKPOINT_PATH = BASE_DIR / "checkpoint_final (7).pth"
 
 
 app = FastAPI(title="Urban Change Detection API")
